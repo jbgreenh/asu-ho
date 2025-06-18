@@ -1,0 +1,25 @@
+[project]
+name = "asu-ho"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.13"
+dependencies = [
+    "appengine-python-standard>=1.1.10",
+    "censusgeocode>=0.5.2",
+    "geopandas>=1.1.0",
+    "googlemaps>=4.10.0",
+    "polars>=1.31.0",
+    "python-dotenv>=1.1.0",
+    "shapely>=2.1.1",
+]
+
+[tool.ruff]
+target-version='py313'
+
+[tool.ruff.format]
+quote-style = 'preserve'
+indent-style = 'space'
+
+[tool.basedpyright]
+typeCheckingMode = 'standard'
