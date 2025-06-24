@@ -1,56 +1,73 @@
-from datetime import date
-import tempfile
+from datetime import date, timedelta
+import time
 
 import censusgeocode as cg
 import polars as pl
 
+import tableau
+
+start_time = time.perf_counter()
 today = date.today()
 
-df = (
-    pl.read_csv('disp_data.csv')
-    .with_columns(
-        # (pl.col('Orig Patient Address Line One') + ', ' + pl.col('Orig Patient City') + ', ' + pl.col('Orig Patient State Abbr')).alias('pat_addr'),
-        # (pl.col('Orig Pharmacy Address Line One') + ', ' + pl.col('Orig Pharmacy City') + ', ' + pl.col('Orig Pharmacy State Abbr')).alias('pharm_addr'),
-        pl.col(['Day of Filled At', 'Day of Patient Birthdate']).str.to_date('%B %d, %Y')
-    )
-    .with_columns(
-        (
-            today.year - pl.col('Day of Patient Birthdate').dt.year() -
-            (pl.date(pl.col('Day of Patient Birthdate').dt.year(), today.month, today.day) < pl.col('Day of Patient Birthdate'))
+asu_ho_luid = tableau.find_view_luid('disp', 'asu health observatory')
+
+for year in range(2018, today.year+1):
+    for month in range(1,13):
+        start_date = date(year=year, month=month, day=1)
+        end_date = (start_date + timedelta(days=32)).replace(day=1) - timedelta(days=1)
+
+        filters = {'start_date':start_date, 'end_date':end_date}
+        print(f'pulling {year}-{month} data from tableau...')
+        tab_data = tableau.lazyframe_from_view_id(asu_ho_luid, filters=filters, infer_schema=False)
+        if tab_data is None:
+            print(f'no data found for {year}-{month}')
+            continue
+        disp_fn = f'disp_data/dd{year}-{month}.csv'
+        tab_data.collect().write_csv(disp_fn)
+        print(f'wrote {disp_fn}')
+
+        disp_data = (
+            pl.read_csv(disp_fn, infer_schema=False)
+            .with_columns(
+                pl.col(['Day of Filled At', 'Day of Patient Birthdate']).str.to_date('%B %d, %Y')
+            )
+            .with_columns(
+                (
+                    today.year - pl.col('Day of Patient Birthdate').dt.year() -
+                    (pl.date(pl.col('Day of Patient Birthdate').dt.year(), today.month, today.day) < pl.col('Day of Patient Birthdate'))
+                )
+                .alias('age')
+            )
+            .with_columns(
+                pl.col('age').cut([17, 34, 44, 64], labels=['<18', '18-34', '35-44', '45-64', '65+']).alias('age_band')
+            )
+            .drop('age', 'Day of Patient Birthdate')
+            .with_row_index()
         )
-        .alias('age')
-    )
-    .with_columns(
-        pl.col('age').cut([17, 34, 44, 64], labels=['<18', '18-34', '35-44', '45-64', '65+']).alias('age_band')
-    )
-    # .drop('age', 'Day of Patient Birthdate', 'Orig Patient Address Line One', 'Orig Patient City', 'Orig Patient State Abbr', 'Orig Pharmacy Address Line One', 'Orig Pharmacy City', 'Orig Pharmacy State Abbr')
-    .drop('age', 'Day of Patient Birthdate')
-    .with_row_index()
-)
 
-pat_addr_df = df.select('index', 'Orig Patient Address Line One', 'Orig Patient City', 'Orig Patient State Abbr', 'Orig Patient Zip')
-pharm_addr_df = df.select('index', 'Orig Pharmacy Address Line One', 'Orig Pharmacy City', 'Orig Pharmacy State Abbr', 'Orig Pharmacy Zip')
-with tempfile.NamedTemporaryFile(mode='w+', suffix='.csv') as tmp:
-    pat_addr_df.write_csv(tmp.name, include_header=False)
-    pat_response_df = pl.DataFrame(cg.addressbatch(tmp.name))
-with tempfile.NamedTemporaryFile(mode='w+', suffix='.csv') as tmp:
-    pharm_addr_df.write_csv(tmp.name, include_header=False)
-    pharm_response_df = pl.DataFrame(cg.addressbatch(tmp.name))
+        pat_addr_df = disp_data.select('index', 'Orig Patient Address Line One', 'Orig Patient City', 'Orig Patient State Abbr', 'Orig Patient Zip')
+        for idx, frame in enumerate(pat_addr_df.iter_slices()):
+            slice_fn = f'disp_slices/{year}-{month}-{idx}_slice.csv'
+            frame.write_csv(slice_fn, include_header=False)
+            print(f'wrote {slice_fn}')
+            print(f'geocoding {slice_fn}...')
+            pat_response_df = pl.DataFrame(cg.addressbatch(slice_fn)).with_columns(pl.col('id').cast(pl.UInt32))
+            print(f'geocoded {slice_fn}')
+            linked = (
+                disp_data
+                .join(pat_response_df
+                    .select(
+                        pl.col('id'),
+                        pl.col('block').alias('pat_census_block')
+                ), left_on='index', right_on='id', how='left', coalesce=True)
+                .drop('index', 'Orig Patient Address Line One', 'Orig Patient City', 'Orig Patient State Abbr', 'Orig Patient Zip', 'Orig Pharmacy Address Line One', 'Orig Pharmacy City', 'Orig Pharmacy State Abbr', 'Orig Pharmacy Zip' )
+            )
 
-linked = (
-    df
-    .join(pat_response_df.select(
-        pl.col('id').cast(pl.Int32),
-        pl.col('block')
-        .alias('pat_census_block')), left_on='index', right_on='id', how='left', coalesce=True)
-    .join(pharm_response_df.select(
-        pl.col('id').cast(pl.Int32),
-        pl.col('block')
-        .alias('pharm_census_block')), left_on='index', right_on='id', how='left', coalesce=True)
-    .drop('index', 'Orig Patient Address Line One', 'Orig Patient City', 'Orig Patient State Abbr', 'Orig Patient Zip', 'Orig Pharmacy Address Line One', 'Orig Pharmacy City', 'Orig Pharmacy State Abbr', 'Orig Pharmacy Zip' )
-    .group_by((pl.col('Day of Filled At').dt.month().cast(pl.String) + '-' + pl.col('Day of Filled At').dt.year().cast(pl.String)).alias('filled_m_y'), 'pat_census_block', 'Patient Gender')
-    .len()
-)
-linked.write_csv('linked.csv')
+            geo_fn = f'geo_files/{year}-{month}-{idx}_geo.csv'
+            linked.write_csv(geo_fn)
+            print(f'wrote {geo_fn}')
+            check_time = time.perf_counter()
+            print(f'script has been running for: {check_time - start_time}s...')
 
-df.write_csv('age_bands.csv')
+end_time = time.perf_counter()
+print(f'took {end_time - start_time}s')

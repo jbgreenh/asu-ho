@@ -12,6 +12,7 @@ dependencies = [
     "polars>=1.31.0",
     "python-dotenv>=1.1.0",
     "shapely>=2.1.1",
+    "tableauserverclient>=0.25",
 ]
 
 [tool.ruff]
