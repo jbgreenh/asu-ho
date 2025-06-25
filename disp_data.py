@@ -54,7 +54,7 @@ for year in range(2018, today.year+1):
 
             check_height = 1
             while check_height == 1:
-                pat_response_df = pl.DataFrame(cg.addressbatch(slice_fn))
+                pat_response_df = pl.DataFrame(cg.addressbatch(slice_fn), infer_schema_length=None)
                 check_height = pat_response_df.height
 
             pat_response_df = pat_response_df.with_columns(pl.col('id').cast(pl.UInt32))
