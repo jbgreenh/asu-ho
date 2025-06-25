@@ -56,7 +56,7 @@ for year in range(2018, today.year+1):
                 print(f'geocoding {slice_fn}...')
                 pat_response_df = pl.DataFrame(cg.addressbatch(slice_fn), infer_schema_length=None)
                 check_height = pat_response_df.height
-                if check_height != 1:
+                if check_height == 1:
                     print('bad census response')
                     print(pat_response_df)
                     print('reattempting geocode...')
