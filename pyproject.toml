@@ -9,6 +9,7 @@ dependencies = [
     "censusgeocode>=0.5.2",
     "geopandas>=1.1.0",
     "googlemaps>=4.10.0",
+    "ipdb>=0.13.13",
     "polars>=1.31.0",
     "python-dotenv>=1.1.0",
     "shapely>=2.1.1",

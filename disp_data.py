@@ -11,8 +11,10 @@ today = date.today()
 
 asu_ho_luid = tableau.find_view_luid('disp', 'asu health observatory')
 
-for year in range(2018, today.year+1):
+for year in range(2025, today.year+1):
     for month in range(1,13):
+        if (year == 2025) and (month < 5):
+            continue
         start_date = date(year=year, month=month, day=1)
         end_date = (start_date + timedelta(days=32)).replace(day=1) - timedelta(days=1)
 
@@ -29,7 +31,8 @@ for year in range(2018, today.year+1):
         disp_data = (
             pl.read_csv(disp_fn, infer_schema=False)
             .with_columns(
-                pl.col(['Day of Filled At', 'Day of Patient Birthdate']).str.to_date('%B %d, %Y')
+                pl.col(['Day of Filled At', 'Day of Patient Birthdate']).str.to_date('%B %d, %Y'),
+                pl.col(['Orig Patient Address Line One', 'Orig Patient City', 'Orig Patient State Abbr', 'Orig Patient Zip']).str.replace_all('\\', '', literal=True)
             )
             .with_columns(
                 (
@@ -55,7 +58,9 @@ for year in range(2018, today.year+1):
             while check_height == 1:
                 print(f'geocoding {slice_fn}...')
                 pat_response_df = pl.DataFrame(cg.addressbatch(slice_fn), infer_schema_length=None)
-                check_height = pat_response_df.height
+                check_height = pat_response_df.filter(pl.col('id').str.contains('While')).height
+                if pat_response_df.filter(pl.col('id').str.contains('<html>')).height > 0:
+                    check_height = 1
                 if check_height == 1:
                     print('bad census response')
                     print(pat_response_df)
