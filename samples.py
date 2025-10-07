@@ -1,4 +1,6 @@
 # write to full_files folder as needed from pmp-analytics xx_.py file
+# probably actually just take this script over there and use it to pull from google drive
+# write to BytesIO, and upload to sftp in a loop
 from io import BytesIO
 from dotenv import load_dotenv
 import os
